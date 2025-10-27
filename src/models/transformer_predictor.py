@@ -110,11 +110,12 @@ class FramePredictor(nn.Module):
         # Transformer uses self-attention to relate frames within each sequence
         temporal_features = self.transformer(features)  # [batch, num_frames, feature_dim]
 
-        # Use last frame's features to predict future
-        last_feature = temporal_features[:, -1, :]  # [batch, feature_dim]
+        # Use all temporal features (pooled) to predict future
+        # Mean pooling across all frames to capture full temporal context
+        pooled_features = temporal_features.mean(dim=1)  # [batch, feature_dim]
 
         # Predict future frame features
-        future_features = self.frame_predictor(last_feature)  # [batch, feature_dim * output_frames]
+        future_features = self.frame_predictor(pooled_features)  # [batch, feature_dim * output_frames]
         future_features = future_features.reshape(batch_size * self.output_frames, self.feature_dim)
 
         # Decode to images

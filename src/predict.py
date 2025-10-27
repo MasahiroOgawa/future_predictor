@@ -76,7 +76,7 @@ def tensor_to_frame(tensor):
 
 def predict_all_frames(model, all_frames_tensor, input_frames_count, device):
     """
-    Predict all frames from the video using sliding window.
+    Predict all frames from the video using autoregressive sliding window.
 
     Args:
         model: Trained model
@@ -92,18 +92,27 @@ def predict_all_frames(model, all_frames_tensor, input_frames_count, device):
     total_frames = all_frames_tensor.shape[0]
 
     with torch.no_grad():
-        # Predict for each possible position in the video
-        for i in range(total_frames - input_frames_count):
-            # Get input sequence: frames [i, i+1, ..., i+input_frames_count-1]
-            input_sequence = all_frames_tensor[i:i + input_frames_count]
-            input_batch = input_sequence.unsqueeze(0).to(device)  # [1, input_frames_count, C, H, W]
+        # Start with initial real frames
+        current_sequence = all_frames_tensor[:input_frames_count].clone()  # [input_frames_count, C, H, W]
 
-            # Predict next frame: frame [i+input_frames_count]
+        # Predict for each position using sliding window with previous predictions
+        for i in range(total_frames - input_frames_count):
+            # Use current sequence (mix of real and predicted frames)
+            input_batch = current_sequence.unsqueeze(0).to(device)  # [1, input_frames_count, C, H, W]
+
+            # Predict next frame
             output = model(input_batch)  # [1, 1, C, H, W]
             predicted_frame = output[0, 0]  # [C, H, W]
 
+            # Save predicted frame
             predicted_frames.append(tensor_to_frame(predicted_frame))
             print(f"Predicted frame {i + input_frames_count}/{total_frames}")
+
+            # Update sliding window: remove oldest frame, add predicted frame
+            current_sequence = torch.cat([
+                current_sequence[1:],  # Remove first frame
+                predicted_frame.unsqueeze(0).cpu()  # Add predicted frame
+            ], dim=0)
 
     return predicted_frames
 
