@@ -36,7 +36,7 @@ future_predictor/
 ```bash
 uv venv
 source .venv/bin/activate  # On Linux/Mac
-uv pip install -e .
+uv sync
 ```
 
 ### Training

@@ -4,6 +4,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image
+import argparse
 
 from models.transformer_predictor import FramePredictor
 
@@ -12,6 +13,19 @@ def load_config(config_path="config/config.yaml"):
     """Load configuration from yaml file."""
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
+
+
+def override_config(config, args):
+    """Override config values with command-line arguments."""
+    if args.input_video is not None:
+        config['paths']['input_video'] = args.input_video
+    if args.output_dir is not None:
+        config['paths']['output_dir'] = args.output_dir
+    if args.model_path is not None:
+        config['paths']['best_model'] = args.model_path
+    if args.device is not None:
+        config['device'] = args.device
+    return config
 
 
 def load_model(model_path, config, device):
@@ -107,8 +121,18 @@ def save_frames(frames, output_dir, prefix="predicted"):
 
 
 def main():
-    # Load configuration
-    config = load_config()
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="Predict future video frames")
+    parser.add_argument("--config", type=str, default="config/config.yaml", help="Path to config file")
+    parser.add_argument("--input_video", type=str, help="Input video path")
+    parser.add_argument("--output_dir", type=str, help="Output directory for predictions")
+    parser.add_argument("--model_path", type=str, help="Path to trained model checkpoint")
+    parser.add_argument("--device", type=str, choices=["cuda", "cpu"], help="Device to use")
+    args = parser.parse_args()
+
+    # Load configuration and override with arguments
+    config = load_config(args.config)
+    config = override_config(config, args)
 
     # Set device
     device = torch.device(config['device'] if torch.cuda.is_available() else 'cpu')

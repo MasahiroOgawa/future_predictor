@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader, random_split
 import yaml
 from pathlib import Path
 from tqdm import tqdm
+import argparse
 
 from models.transformer_predictor import FramePredictor
 from data.dataset import VideoFrameDataset
@@ -13,6 +14,23 @@ def load_config(config_path="config/config.yaml"):
     """Load configuration from yaml file."""
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
+
+
+def override_config(config, args):
+    """Override config values with command-line arguments."""
+    if args.epochs is not None:
+        config['training']['epochs'] = args.epochs
+    if args.batch_size is not None:
+        config['training']['batch_size'] = args.batch_size
+    if args.learning_rate is not None:
+        config['training']['learning_rate'] = args.learning_rate
+    if args.input_frames is not None:
+        config['model']['input_frames'] = args.input_frames
+    if args.output_frames is not None:
+        config['model']['output_frames'] = args.output_frames
+    if args.device is not None:
+        config['device'] = args.device
+    return config
 
 
 def train_epoch(model, dataloader, criterion, optimizer, device):
@@ -61,12 +79,33 @@ def validate(model, dataloader, criterion, device):
 
 
 def main():
-    # Load configuration
-    config = load_config()
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="Train video frame prediction model")
+    parser.add_argument("--config", type=str, default="config/config.yaml", help="Path to config file")
+    parser.add_argument("--epochs", type=int, help="Number of training epochs")
+    parser.add_argument("--batch_size", type=int, help="Batch size")
+    parser.add_argument("--learning_rate", type=float, help="Learning rate")
+    parser.add_argument("--input_frames", type=int, help="Number of input frames")
+    parser.add_argument("--output_frames", type=int, help="Number of output frames")
+    parser.add_argument("--device", type=str, choices=["cuda", "cpu"], help="Device to use")
+    args = parser.parse_args()
+
+    # Load configuration and override with arguments
+    config = load_config(args.config)
+    config = override_config(config, args)
 
     # Set device
     device = torch.device(config['device'] if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
+
+    # Check if frames directory exists
+    frame_dir = Path(config['data']['output_dir'])
+    if not frame_dir.exists() or not any(frame_dir.iterdir()):
+        print(f"\nError: Frame directory '{frame_dir}' is empty or doesn't exist!")
+        print("Please run preprocessing first:")
+        print("  python src/preprocess.py")
+        print("\nThis will extract frames from videos in the video directory.")
+        return
 
     # Create dataset
     print("Loading dataset...")
