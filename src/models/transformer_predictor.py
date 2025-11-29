@@ -18,27 +18,28 @@ class FramePredictor(nn.Module):
         img_w = config['image']['width']
         img_c = config['image']['channels']
 
+        # Compute channel sizes based on image dimensions with minimum values
+        # to ensure sufficient model capacity even for small images
+        ch1 = max(32, img_w // 5)   # e.g., 320 -> 64, 32 -> 32 (min)
+        ch2 = max(64, img_w // 2)   # e.g., 320 -> 160, 32 -> 64 (min)
+        ch3 = max(128, img_w)       # e.g., 320 -> 320, 32 -> 128 (min)
+        self.bottleneck_ch = ch3
+
+        # Calculate spatial dimensions after encoder (each conv halves the size)
+        self.spatial_h = img_h // 8
+        self.spatial_w = img_w // 8
+
         # Encode each frame to feature vector
-        # Conv2d arguments: (in_channels, out_channels, kernel_size, stride, padding)
-        # Output size = (Input size - kernel_size + 2*padding) / stride + 1
-        #
-        # Size transformations for 320x240x3 input:
-        # Input:  320x240x3
-        # Conv1:  (320-7+2*3)/2+1 = 160, (240-7+2*3)/2+1 = 120  -> 160x120x64
-        # Conv2:  (160-3+2*1)/2+1 = 80,  (120-3+2*1)/2+1 = 60   -> 80x60x128
-        # Conv3:  (80-3+2*1)/2+1 = 40,   (60-3+2*1)/2+1 = 30    -> 40x30x256
-        # AdaptiveAvgPool2d: 40x30x256 -> 1x1x256
-        # Flatten + Linear: 256 -> feature_dim (e.g., 256)
         self.frame_encoder = nn.Sequential(
-            nn.Conv2d(img_c, 64, 7, stride=2, padding=3),  # 320x240x3 -> 160x120x64
+            nn.Conv2d(img_c, ch1, 7, stride=2, padding=3),
             nn.ReLU(),
-            nn.Conv2d(64, 128, 3, stride=2, padding=1),     # 160x120x64 -> 80x60x128
+            nn.Conv2d(ch1, ch2, 3, stride=2, padding=1),
             nn.ReLU(),
-            nn.Conv2d(128, 256, 3, stride=2, padding=1),    # 80x60x128 -> 40x30x256
+            nn.Conv2d(ch2, ch3, 3, stride=2, padding=1),
             nn.ReLU(),
-            nn.AdaptiveAvgPool2d((1, 1)),                   # 40x30x256 -> 1x1x256
-            nn.Flatten(),                                    # 1x1x256 -> 256
-            nn.Linear(256, self.feature_dim)                # 256 -> feature_dim
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Linear(ch3, self.feature_dim)
         )
 
         # Transformer encoder for temporal modeling
@@ -58,23 +59,21 @@ class FramePredictor(nn.Module):
         self.frame_predictor = nn.Linear(self.feature_dim, self.feature_dim * self.output_frames)
 
         # Decode features back to images (symmetric to encoder)
-        # Encoder: 320x240x3 -> 160x120x64 -> 80x60x128 -> 40x30x256 -> 1x1x256 -> feature_dim
-        # Decoder: feature_dim -> 256 -> 1x1x256 -> 40x30x256 -> 80x60x128 -> 160x120x64 -> 320x240x3
-        self.decoder_fc = nn.Linear(self.feature_dim, 256)
+        self.decoder_fc = nn.Linear(self.feature_dim, ch3)
 
         self.frame_decoder = nn.Sequential(
-            # 1x1x256 -> 40x30x256 (reverse of AdaptiveAvgPool)
-            nn.ConvTranspose2d(256, 256, kernel_size=(30, 40)),
+            # 1x1xch3 -> spatial_h x spatial_w x ch3
+            nn.ConvTranspose2d(ch3, ch3, kernel_size=(self.spatial_h, self.spatial_w)),
             nn.ReLU(),
-            # 40x30x256 -> 80x60x128 (reverse of Conv3)
-            nn.ConvTranspose2d(256, 128, 3, stride=2, padding=1, output_padding=1),
+            # -> 2x spatial size, ch2 channels
+            nn.ConvTranspose2d(ch3, ch2, 3, stride=2, padding=1, output_padding=1),
             nn.ReLU(),
-            # 80x60x128 -> 160x120x64 (reverse of Conv2)
-            nn.ConvTranspose2d(128, 64, 3, stride=2, padding=1, output_padding=1),
+            # -> 4x spatial size, ch1 channels
+            nn.ConvTranspose2d(ch2, ch1, 3, stride=2, padding=1, output_padding=1),
             nn.ReLU(),
-            # 160x120x64 -> 320x240x3 (reverse of Conv1)
-            nn.ConvTranspose2d(64, img_c, 7, stride=2, padding=3, output_padding=1),
-            nn.Sigmoid()  # Output in [0, 1] range
+            # -> 8x spatial size = original, img_c channels
+            nn.ConvTranspose2d(ch1, img_c, 7, stride=2, padding=3, output_padding=1),
+            nn.Sigmoid()
         )
 
         self.img_h = img_h
@@ -131,11 +130,8 @@ class FramePredictor(nn.Module):
         future_features = future_features.reshape(batch_size * self.output_frames, self.feature_dim)
 
         # Decode to images
-        # First apply FC layer: [batch * output_frames, feature_dim] -> [batch * output_frames, 256]
         decoded = self.decoder_fc(future_features)
-        # Reshape to spatial: [batch * output_frames, 256] -> [batch * output_frames, 256, 1, 1]
-        decoded = decoded.view(-1, 256, 1, 1)
-        # Apply transposed convolutions: [batch * output_frames, 256, 1, 1] -> [batch * output_frames, C, H, W]
+        decoded = decoded.view(-1, self.bottleneck_ch, 1, 1)
         output = self.frame_decoder(decoded)
         output = output.reshape(batch_size, self.output_frames, self.img_c, self.img_h, self.img_w)
 

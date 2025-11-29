@@ -109,10 +109,12 @@ def main():
 
     # Create dataset
     print("Loading dataset...")
+    target_size = (config['image']['width'], config['image']['height'])
     dataset = VideoFrameDataset(
         frame_dir=config['data']['output_dir'],
         input_frames=config['model']['input_frames'],
-        output_frames=config['model']['output_frames']
+        output_frames=config['model']['output_frames'],
+        target_size=target_size
     )
 
     # Split dataset

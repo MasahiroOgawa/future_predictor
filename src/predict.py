@@ -74,14 +74,15 @@ def tensor_to_frame(tensor):
     return frame
 
 
-def predict_all_frames(model, all_frames_tensor, input_frames_count, device):
+def predict_future_frames(model, all_frames_tensor, input_frames_count, output_frames_count, device):
     """
-    Predict all frames from the video using autoregressive sliding window.
+    Predict future frames using the last N frames from the input video.
 
     Args:
         model: Trained model
         all_frames_tensor: All video frames as tensor [total_frames, C, H, W]
         input_frames_count: Number of input frames needed for prediction
+        output_frames_count: Number of future frames to predict
         device: Device to run on
 
     Returns:
@@ -89,30 +90,20 @@ def predict_all_frames(model, all_frames_tensor, input_frames_count, device):
     """
     model.eval()
     predicted_frames = []
-    total_frames = all_frames_tensor.shape[0]
 
     with torch.no_grad():
-        # Start with initial real frames
-        current_sequence = all_frames_tensor[:input_frames_count].clone()  # [input_frames_count, C, H, W]
+        # Use the last input_frames_count frames from the video as context
+        input_sequence = all_frames_tensor[-input_frames_count:]  # [input_frames_count, C, H, W]
+        input_batch = input_sequence.unsqueeze(0).to(device)  # [1, input_frames_count, C, H, W]
 
-        # Predict for each position using sliding window with previous predictions
-        for i in range(total_frames - input_frames_count):
-            # Use current sequence (mix of real and predicted frames)
-            input_batch = current_sequence.unsqueeze(0).to(device)  # [1, input_frames_count, C, H, W]
+        # Predict future frames
+        output = model(input_batch)  # [1, output_frames_count, C, H, W]
 
-            # Predict next frame
-            output = model(input_batch)  # [1, 1, C, H, W]
-            predicted_frame = output[0, 0]  # [C, H, W]
-
-            # Save predicted frame
+        # Convert all predicted frames to numpy
+        for i in range(output_frames_count):
+            predicted_frame = output[0, i]  # [C, H, W]
             predicted_frames.append(tensor_to_frame(predicted_frame))
-            print(f"Predicted frame {i + input_frames_count}/{total_frames}")
-
-            # Update sliding window: remove oldest frame, add predicted frame
-            current_sequence = torch.cat([
-                current_sequence[1:],  # Remove first frame
-                predicted_frame.unsqueeze(0).cpu()  # Add predicted frame
-            ], dim=0)
+            print(f"Predicted future frame {i + 1}/{output_frames_count}")
 
     return predicted_frames
 
@@ -172,20 +163,21 @@ def main():
     # Convert to tensor
     all_frames_tensor = frames_to_tensor(all_frames_numpy)
 
-    # Predict all frames
-    print("Predicting frames...")
-    predicted_frames = predict_all_frames(
+    # Predict future frames using the last frames of the video
+    print(f"Using last {config['model']['input_frames']} frames to predict {config['model']['output_frames']} future frame(s)...")
+    predicted_frames = predict_future_frames(
         model,
         all_frames_tensor,
         config['model']['input_frames'],
+        config['model']['output_frames'],
         device
     )
 
     # Save results
     print("Saving predictions...")
-    save_frames(predicted_frames, config['paths']['output_dir'])
+    save_frames(predicted_frames, config['paths']['output_dir'], prefix="future")
 
-    print(f"\nPrediction complete! Saved {len(predicted_frames)} frames to {config['paths']['output_dir']}")
+    print(f"\nPrediction complete! Saved {len(predicted_frames)} future frame(s) to {config['paths']['output_dir']}")
 
 
 if __name__ == "__main__":
