@@ -57,11 +57,23 @@ class FramePredictor(nn.Module):
         # Predict features for output frames
         self.frame_predictor = nn.Linear(self.feature_dim, self.feature_dim * self.output_frames)
 
-        # Decode features back to images
+        # Decode features back to images (symmetric to encoder)
+        # Encoder: 320x240x3 -> 160x120x64 -> 80x60x128 -> 40x30x256 -> 1x1x256 -> feature_dim
+        # Decoder: feature_dim -> 256 -> 1x1x256 -> 40x30x256 -> 80x60x128 -> 160x120x64 -> 320x240x3
+        self.decoder_fc = nn.Linear(self.feature_dim, 256)
+
         self.frame_decoder = nn.Sequential(
-            nn.Linear(self.feature_dim, 256),
+            # 1x1x256 -> 40x30x256 (reverse of AdaptiveAvgPool)
+            nn.ConvTranspose2d(256, 256, kernel_size=(30, 40)),
             nn.ReLU(),
-            nn.Linear(256, img_c * img_h * img_w),
+            # 40x30x256 -> 80x60x128 (reverse of Conv3)
+            nn.ConvTranspose2d(256, 128, 3, stride=2, padding=1, output_padding=1),
+            nn.ReLU(),
+            # 80x60x128 -> 160x120x64 (reverse of Conv2)
+            nn.ConvTranspose2d(128, 64, 3, stride=2, padding=1, output_padding=1),
+            nn.ReLU(),
+            # 160x120x64 -> 320x240x3 (reverse of Conv1)
+            nn.ConvTranspose2d(64, img_c, 7, stride=2, padding=3, output_padding=1),
             nn.Sigmoid()  # Output in [0, 1] range
         )
 
@@ -119,7 +131,12 @@ class FramePredictor(nn.Module):
         future_features = future_features.reshape(batch_size * self.output_frames, self.feature_dim)
 
         # Decode to images
-        output = self.frame_decoder(future_features)  # [batch * output_frames, C*H*W]
+        # First apply FC layer: [batch * output_frames, feature_dim] -> [batch * output_frames, 256]
+        decoded = self.decoder_fc(future_features)
+        # Reshape to spatial: [batch * output_frames, 256] -> [batch * output_frames, 256, 1, 1]
+        decoded = decoded.view(-1, 256, 1, 1)
+        # Apply transposed convolutions: [batch * output_frames, 256, 1, 1] -> [batch * output_frames, C, H, W]
+        output = self.frame_decoder(decoded)
         output = output.reshape(batch_size, self.output_frames, self.img_c, self.img_h, self.img_w)
 
         return output
