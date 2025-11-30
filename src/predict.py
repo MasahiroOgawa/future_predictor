@@ -28,10 +28,37 @@ def override_config(config, args):
     return config
 
 
+def infer_checkpoint_image_size(checkpoint):
+    """Infer the image size used during training from checkpoint weights."""
+    state_dict = checkpoint['model_state_dict']
+
+    # Get decoder's first ConvTranspose2d weight shape: [in_ch, out_ch, H, W]
+    decoder_weight = state_dict['frame_decoder.0.weight']
+    spatial_h = decoder_weight.shape[2]
+    spatial_w = decoder_weight.shape[3]
+
+    # Original image size = spatial size * 8 (due to 3 stride-2 convolutions)
+    return spatial_h * 8, spatial_w * 8
+
+
 def load_model(model_path, config, device):
     """Load trained model from checkpoint."""
+    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+
+    # Check if checkpoint was trained with different image dimensions
+    ckpt_h, ckpt_w = infer_checkpoint_image_size(checkpoint)
+    cfg_h, cfg_w = config['image']['height'], config['image']['width']
+
+    if ckpt_h != cfg_h or ckpt_w != cfg_w:
+        print(f"\nError: Image dimension mismatch!")
+        print(f"  Checkpoint was trained on: {ckpt_w}x{ckpt_h} images")
+        print(f"  Current config expects:    {cfg_w}x{cfg_h} images")
+        print(f"\nTo fix this, either:")
+        print(f"  1. Update config/config.yaml to use width: {ckpt_w}, height: {ckpt_h}")
+        print(f"  2. Use a checkpoint trained with {cfg_w}x{cfg_h} images")
+        raise SystemExit(1)
+
     model = FramePredictor(config).to(device)
-    checkpoint = torch.load(model_path, map_location=device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
     return model
