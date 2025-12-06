@@ -101,7 +101,7 @@ def tensor_to_frame(tensor):
     return frame
 
 
-def predict_future_frames(model, all_frames_tensor, input_frames_count, output_frames_count, device):
+def predict_future_frames(model, all_frames_tensor, input_frames_count, output_frames_count, device, save_debug=False, output_dir=None):
     """
     Predict future frames using the last N frames from the input video.
 
@@ -111,26 +111,74 @@ def predict_future_frames(model, all_frames_tensor, input_frames_count, output_f
         input_frames_count: Number of input frames needed for prediction
         output_frames_count: Number of future frames to predict
         device: Device to run on
+        save_debug: If True, save intermediate residual images for debugging
+        output_dir: Output directory for debug images
 
     Returns:
         List of predicted frames as numpy arrays
     """
     model.eval()
     predicted_frames = []
+    residual_frames = []
 
     with torch.no_grad():
         # Use the last input_frames_count frames from the video as context
         input_sequence = all_frames_tensor[-input_frames_count:]  # [input_frames_count, C, H, W]
         input_batch = input_sequence.unsqueeze(0).to(device)  # [1, input_frames_count, C, H, W]
 
-        # Predict future frames
-        output = model(input_batch)  # [1, output_frames_count, C, H, W]
+        # Predict future frames (with residual for debugging)
+        output, residual = model(input_batch, return_residual=True)  # [1, output_frames_count, C, H, W]
+
+        # Print residual statistics for debugging
+        print(f"\n=== Residual Debug Info ===")
+        print(f"Residual shape: {residual.shape}")
+        print(f"Residual min: {residual.min().item():.6f}")
+        print(f"Residual max: {residual.max().item():.6f}")
+        print(f"Residual mean: {residual.mean().item():.6f}")
+        print(f"Residual std: {residual.std().item():.6f}")
+        print(f"Residual abs mean: {residual.abs().mean().item():.6f}")
+        print(f"===========================\n")
 
         # Convert all predicted frames to numpy
         for i in range(output_frames_count):
             predicted_frame = output[0, i]  # [C, H, W]
             predicted_frames.append(tensor_to_frame(predicted_frame))
             print(f"Predicted future frame {i + 1}/{output_frames_count}")
+
+        # Save debug images if requested
+        if save_debug and output_dir:
+            debug_dir = Path(output_dir) / "debug"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+
+            # Save the base frame (last input frame)
+            base_frame = input_batch[0, -1]  # [C, H, W]
+            base_frame_np = tensor_to_frame(base_frame)
+            Image.fromarray(base_frame_np).save(debug_dir / "base_frame.png")
+            print(f"Saved base frame to {debug_dir / 'base_frame.png'}")
+
+            for i in range(output_frames_count):
+                residual_frame = residual[0, i]  # [C, H, W]
+
+                # Normalize residual to [0, 1] for visualization
+                # Residual is in [-1, 1] from Tanh, map to [0, 1]
+                residual_vis = (residual_frame + 1) / 2  # Map [-1, 1] to [0, 1]
+                residual_vis_np = tensor_to_frame(residual_vis)
+
+                # Also save the absolute residual (amplified for visibility)
+                residual_abs = residual_frame.abs()
+                residual_abs_amplified = (residual_abs * 10).clamp(0, 1)  # Amplify by 10x
+                residual_abs_np = tensor_to_frame(residual_abs_amplified)
+
+                # Save residual images
+                Image.fromarray(residual_vis_np).save(debug_dir / f"residual_{i:06d}.png")
+                Image.fromarray(residual_abs_np).save(debug_dir / f"residual_abs_{i:06d}.png")
+
+                # Print per-frame residual stats
+                print(f"Frame {i}: residual mean={residual_frame.mean().item():.6f}, "
+                      f"std={residual_frame.std().item():.6f}, "
+                      f"abs_max={residual_frame.abs().max().item():.6f}")
+
+            print(f"\nSaved {output_frames_count} residual debug images to {debug_dir}")
 
     return predicted_frames
 
@@ -155,6 +203,7 @@ def main():
     parser.add_argument("--output_dir", type=str, help="Output directory for predictions")
     parser.add_argument("--model_path", type=str, help="Path to trained model checkpoint")
     parser.add_argument("--device", type=str, choices=["cuda", "cpu"], help="Device to use")
+    parser.add_argument("--debug", action="store_true", help="Save intermediate residual images for debugging")
     args = parser.parse_args()
 
     # Load configuration and override with arguments
@@ -197,7 +246,9 @@ def main():
         all_frames_tensor,
         config['model']['input_frames'],
         config['model']['output_frames'],
-        device
+        device,
+        save_debug=args.debug,
+        output_dir=config['paths']['output_dir']
     )
 
     # Save results

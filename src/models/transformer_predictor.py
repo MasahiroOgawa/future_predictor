@@ -104,15 +104,17 @@ class FramePredictor(nn.Module):
         nn.init.zeros_(last_conv.weight)
         nn.init.zeros_(last_conv.bias)
 
-    def forward(self, x):
+    def forward(self, x, return_residual=False):
         """
         Forward pass for frame prediction with residual learning.
 
         Args:
             x: Input frames [batch, num_frames, C, H, W]
+            return_residual: If True, also return the raw residual for debugging
 
         Returns:
             Predicted frames [batch, output_frames, C, H, W]
+            If return_residual=True, returns (output, residual) tuple
         """
         batch_size = x.shape[0]
         num_frames = x.shape[1]
@@ -151,4 +153,6 @@ class FramePredictor(nn.Module):
         output = base_frame + residual
         output = output.clamp(0, 1)
 
+        if return_residual:
+            return output, residual
         return output

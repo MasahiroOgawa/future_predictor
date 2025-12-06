@@ -6,8 +6,8 @@ data:
 
 # Image configuration
 image:
-  width: 320
-  height: 240
+  width: 32
+  height: 24
   channels: 3
 
 # Model configuration
@@ -26,14 +26,14 @@ training:
   epochs: 1000
   learning_rate: 0.0001
   weight_decay: 0.0001
-  save_interval: 100 # Save checkpoint every N epochs
+  save_interval: 500 # Save checkpoint every N epochs
 
 # Paths
 paths:
   checkpoint_dir: "checkpoints"
   output_dir: "outputs"
   best_model: "checkpoints/best_model.pth"
-  input_video: "data/videos/test_video.mp4" # Video file for inference
+  input_video: "data/videos/mousemove2.MOV" # Video file for inference
 
 # Device
 device: "cuda" # "cuda" or "cpu"
