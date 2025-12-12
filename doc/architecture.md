@@ -1,6 +1,6 @@
 # Video Frame Predictor Architecture
 
-This document describes the detailed architecture of the current transformer-based video frame prediction model with residual learning.
+This document describes the detailed architecture of the current transformer-based video frame prediction model with residual learning and composite loss functions.
 
 ## Architecture Overview
 
@@ -151,27 +151,28 @@ graph TB
 - **Purpose**: Predict changes rather than absolute frames
 - **Benefit**: Easier to learn small changes between consecutive frames
 
-## Key Design Decisions
+## Loss Function Strategy
 
-### 1. Residual Learning
-- Model predicts **Δ (change)** instead of absolute frames
-- Initial output equals last input frame (identity mapping)
-- Easier optimization: learn what changes, not what stays the same
+To combat the "static prediction" issue common in MSE-based video prediction, we employ a composite loss function (`CombinedLoss`):
 
-### 2. Initialization Strategy
-- Residual predictor's last layer: **zeros**
-- Decoder's last conv layer: **zeros**
-- Result: Model starts by outputting last input frame (safe baseline)
+$$ L_{total} = \lambda_{mse}L_{mse} + \lambda_{temp}L_{temporal} + \lambda_{grad}L_{grad} + \lambda_{percept}L_{perceptual} $$
 
-### 3. Spatial Downsampling
-- Input: 24 × 32 → Bottleneck: 3 × 4 (8× downsampling)
-- Reduces computation while preserving spatial structure
-- AdaptiveAvgPool further reduces to 1×1 for temporal modeling
+### 1. MSE Loss ($L_{mse}$)
+- Standard Mean Squared Error between predicted and target pixels.
+- Ensures global consistency but can lead to blurry averages.
 
-### 4. Temporal Modeling
-- Transformer processes sequence of 10 frame features
-- Self-attention captures temporal dependencies
-- Last feature contains context from all input frames
+### 2. Temporal Difference Loss ($L_{temporal}$)
+- Computes MSE between the *differences* of consecutive frames: 
+  $$ L_{temp} = MSE((P_t - P_{t-1}), (T_t - T_{t-1})) $$
+- **Benefit**: Explicitly forces the model to predict the *motion* correctly. If the model predicts a static frame ($P_t = P_{t-1}$), this loss will be high if the ground truth has motion.
+
+### 3. Gradient Loss ($L_{grad}$)
+- Computes MSE between the spatial gradients (Sobel filters) of prediction and target.
+- **Benefit**: Penalizes blurry edges. Forces the model to generate sharp structures.
+
+### 4. Perceptual Loss ($L_{perceptual}$)
+- Computes MSE between feature maps extracted from a pretrained VGG16 network.
+- **Benefit**: Ensures high-level semantic similarity (e.g., maintaining object shapes) rather than just pixel-perfect matches.
 
 ## Configuration (config.yaml)
 
@@ -185,29 +186,9 @@ model:
   dim_feedforward: 1024 # FFN dimension
   dropout: 0.1
 
-image:
-  width: 32
-  height: 24
-  channels: 3
+loss:
+  mse_weight: 1.0
+  temporal_weight: 1.0  # Emphasize temporal consistency
+  gradient_weight: 1.0  # Emphasize structural sharpness
+  perceptual_weight: 0.1 # High-level feature matching
 ```
-
-## Data Flow Summary
-
-1. **Input**: 10 frames [B, 10, 3, 24, 32]
-2. **Encode**: Each frame → 256-dim feature vector
-3. **Temporal**: Transformer learns patterns across 10 frames
-4. **Predict**: Generate residual features for 10 output frames
-5. **Decode**: Residual features → residual images
-6. **Add**: Last input frame + residual → final predictions
-7. **Output**: 10 predicted frames [B, 10, 3, 24, 32]
-
-## Why It Still Outputs Static Frames
-
-Despite residual learning, the model may still output static frames because:
-
-1. **MSE Loss Dominance**: MSE loss still rewards copying the last frame
-2. **Weak Temporal Signal**: Small changes are hard to learn with MSE alone
-3. **No Motion Penalty**: Nothing explicitly penalizes static predictions
-4. **Initialization**: Zero-initialized residuals make it easy to stay at zero
-
-**Solution**: Add temporal difference loss and gradient loss to force learning of changes.

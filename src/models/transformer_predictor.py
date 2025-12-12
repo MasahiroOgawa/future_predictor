@@ -16,12 +16,12 @@ class FramePredictor(nn.Module):
     def __init__(self, config):
         super().__init__()
 
-        self.input_frames = config['model']['input_frames']
-        self.output_frames = config['model']['output_frames']
-        self.feature_dim = config['model']['feature_dim']
-        img_h = config['image']['height']
-        img_w = config['image']['width']
-        img_c = config['image']['channels']
+        self.input_frames = config["model"]["input_frames"]
+        self.output_frames = config["model"]["output_frames"]
+        self.feature_dim = config["model"]["feature_dim"]
+        img_h = config["image"]["height"]
+        img_w = config["image"]["width"]
+        img_c = config["image"]["channels"]
 
         # Compute channel sizes based on image dimensions with minimum values
         # to ensure sufficient model capacity even for small images
@@ -44,20 +44,19 @@ class FramePredictor(nn.Module):
             nn.ReLU(),
             nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten(),
-            nn.Linear(ch3, self.feature_dim)
+            nn.Linear(ch3, self.feature_dim),
         )
 
         # Transformer encoder for temporal modeling
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=self.feature_dim,
-            nhead=config['model']['nhead'],
-            dim_feedforward=config['model']['dim_feedforward'],
-            dropout=config['model']['dropout'],
-            batch_first=True
+            nhead=config["model"]["nhead"],
+            dim_feedforward=config["model"]["dim_feedforward"],
+            dropout=config["model"]["dropout"],
+            batch_first=True,
         )
         self.transformer = nn.TransformerEncoder(
-            encoder_layer,
-            num_layers=config['model']['num_layers']
+            encoder_layer, num_layers=config["model"]["num_layers"]
         )
 
         # Residual predictor: predicts the change for each output frame
@@ -65,7 +64,7 @@ class FramePredictor(nn.Module):
         self.residual_predictor = nn.Sequential(
             nn.Linear(self.feature_dim, self.feature_dim),
             nn.ReLU(),
-            nn.Linear(self.feature_dim, self.feature_dim * self.output_frames)
+            nn.Linear(self.feature_dim, self.feature_dim * self.output_frames),
         )
 
         # Decode features back to images (symmetric to encoder)
@@ -79,7 +78,7 @@ class FramePredictor(nn.Module):
             nn.ConvTranspose2d(ch2, ch1, 3, stride=2, padding=1, output_padding=1),
             nn.ReLU(),
             nn.ConvTranspose2d(ch1, img_c, 7, stride=2, padding=3, output_padding=1),
-            nn.Tanh()  # Output in [-1, 1] range for residual
+            nn.Tanh(),  # Output in [-1, 1] range for residual
         )
 
         self.img_h = img_h
@@ -123,27 +122,37 @@ class FramePredictor(nn.Module):
         last_input_frame = x[:, -1]  # [batch, C, H, W]
 
         # Encode each frame independently using CNN
-        x_reshaped = x.reshape(batch_size * num_frames, self.img_c, self.img_h, self.img_w)
+        x_reshaped = x.reshape(
+            batch_size * num_frames, self.img_c, self.img_h, self.img_w
+        )
         features = self.frame_encoder(x_reshaped)  # [batch * num_frames, feature_dim]
 
         # Reshape back to sequences
         features = features.reshape(batch_size, num_frames, self.feature_dim)
 
         # Apply transformer to learn temporal patterns
-        temporal_features = self.transformer(features)  # [batch, num_frames, feature_dim]
+        temporal_features = self.transformer(
+            features
+        )  # [batch, num_frames, feature_dim]
 
         # Use last frame's temporal feature (contains context from all frames)
         last_temporal_feature = temporal_features[:, -1]  # [batch, feature_dim]
 
         # Predict residual features for each output frame
-        residual_features = self.residual_predictor(last_temporal_feature)  # [batch, feature_dim * output_frames]
-        residual_features = residual_features.reshape(batch_size * self.output_frames, self.feature_dim)
+        residual_features = self.residual_predictor(
+            last_temporal_feature
+        )  # [batch, feature_dim * output_frames]
+        residual_features = residual_features.reshape(
+            batch_size * self.output_frames, self.feature_dim
+        )
 
         # Decode residual to images
         decoded = self.decoder_fc(residual_features)
         decoded = decoded.view(-1, self.bottleneck_ch, 1, 1)
         residual = self.frame_decoder(decoded)  # [batch * output_frames, C, H, W]
-        residual = residual.reshape(batch_size, self.output_frames, self.img_c, self.img_h, self.img_w)
+        residual = residual.reshape(
+            batch_size, self.output_frames, self.img_c, self.img_h, self.img_w
+        )
 
         # Add residual to last input frame (broadcast across output_frames)
         # last_input_frame: [batch, C, H, W] -> [batch, 1, C, H, W]

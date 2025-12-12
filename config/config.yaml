@@ -3,6 +3,7 @@ data:
   video_dir: "data/videos"
   output_dir: "data/frames"
   train_split: 0.8
+  num_workers: 4
 
 # Image configuration
 image:
@@ -20,6 +21,15 @@ model:
   dim_feedforward: 1024 # Feedforward dimension
   dropout: 0.1
 
+# Loss configuration
+loss:
+  mse_weight: 1.0
+  temporal_weight: 2.0      # Emphasize temporal consistency
+  gradient_weight: 1.0
+  perceptual_weight: 0.1
+  flow_weight: 0.0          # Disabled by default, can be enabled
+  predict_residual: true    # Predict differences, not absolute frames
+
 # Training configuration
 training:
   batch_size: 8
@@ -27,6 +37,10 @@ training:
   learning_rate: 0.0001
   weight_decay: 0.0001
   save_interval: 500 # Save checkpoint every N epochs
+  gradient_clip: 1.0
+  scheduler: "reduce_on_plateau"
+  scheduler_patience: 10
+  scheduler_factor: 0.5
 
 # Paths
 paths:

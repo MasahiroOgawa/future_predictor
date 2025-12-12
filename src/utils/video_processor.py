@@ -1,12 +1,13 @@
-import cv2
 import os
 from pathlib import Path
+
+import cv2
 import yaml
 
 
 def load_config(config_path="config/config.yaml"):
     """Load configuration from yaml file."""
-    with open(config_path, 'r') as f:
+    with open(config_path, "r") as f:
         return yaml.safe_load(f)
 
 
@@ -58,11 +59,11 @@ def process_videos(video_dir, output_dir, config):
         output_dir: Directory to save extracted frames
         config: Configuration dictionary
     """
-    video_extensions = ['.mp4', '.avi', '.mov', '.mkv']
+    video_extensions = [".mp4", ".avi", ".mov", ".mkv"]
     video_dir = Path(video_dir)
 
-    target_size = (config['image']['width'], config['image']['height'])
+    target_size = (config["image"]["width"], config["image"]["height"])
 
-    for video_path in video_dir.glob('*'):
+    for video_path in video_dir.glob("*"):
         if video_path.suffix.lower() in video_extensions:
             extract_frames(video_path, output_dir, target_size)

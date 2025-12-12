@@ -1,8 +1,9 @@
-import torch
-from torch.utils.data import Dataset
 from pathlib import Path
-from PIL import Image
+
 import numpy as np
+import torch
+from PIL import Image
+from torch.utils.data import Dataset
 
 
 class VideoFrameDataset(Dataset):
@@ -11,7 +12,14 @@ class VideoFrameDataset(Dataset):
     Returns a sequence of input frames and target output frames.
     """
 
-    def __init__(self, frame_dir, input_frames=5, output_frames=1, transform=None, target_size=None):
+    def __init__(
+        self,
+        frame_dir,
+        input_frames=5,
+        output_frames=1,
+        transform=None,
+        target_size=None,
+    ):
         """
         Args:
             frame_dir: Directory containing extracted frames (organized by video)
@@ -32,13 +40,13 @@ class VideoFrameDataset(Dataset):
         # Build sequence indices
         self.sequences = []
         for video_dir in self.video_dirs:
-            frames = sorted(list(video_dir.glob('*.png')))
+            frames = sorted(list(video_dir.glob("*.png")))
             num_frames = len(frames)
 
             # Create sliding window sequences
             for i in range(num_frames - input_frames - output_frames + 1):
-                input_seq = frames[i:i + input_frames]
-                output_seq = frames[i + input_frames:i + input_frames + output_frames]
+                input_seq = frames[i : i + input_frames]
+                output_seq = frames[i + input_frames : i + input_frames + output_frames]
                 self.sequences.append((input_seq, output_seq))
 
     def __len__(self):
@@ -46,7 +54,7 @@ class VideoFrameDataset(Dataset):
 
     def _load_frame(self, path):
         """Load and process a single frame."""
-        img = Image.open(path).convert('RGB')
+        img = Image.open(path).convert("RGB")
         if self.target_size:
             img = img.resize(self.target_size, Image.BILINEAR)
         if self.transform:
